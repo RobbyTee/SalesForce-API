@@ -35,16 +35,16 @@ def get_logger(module, filename=None):
 
 class CredentialsManager:
     def __init__(self) -> None:
-        self.logger = get_logger(module='CredentialsManager')
-        self.config_path = 'keys/config.json'        
+        self.logger = get_logger(module='CredentialsManager')       
         
     
     def load_config(self) -> bool:
         # Load the config file if possible
-        global config
+        global config, config_path
+        config_path = 'keys/config.json' 
         config = {}
         try:
-            with open(self.config_path, "r") as file:
+            with open(config_path, "r") as file:
                 config = json.load(file)
             return True
         
@@ -54,7 +54,7 @@ class CredentialsManager:
 
     def save_config(self) -> None:
         # Save the config file
-        with open(self.config_path, 'w') as file:
+        with open(config_path, 'w') as file:
             json.dump(config, file, indent=4)
 
 
@@ -100,7 +100,13 @@ class SalesForceAutomation:
                   'Authorization': f'Bearer {config["access_token"]}',
                   'Content-Type': 'application/json'
                     }
-    
+        self.email_templates_mapping = {
+            'VOW Full': {
+                'Normal': '00X4v000002oCuOEAU',
+                'Self Install': '00X4v000002oD6PEAU'
+            }
+        }
+  
 
     def get_report(self, report_id: str) -> DataFrame:
       """
@@ -181,22 +187,39 @@ class SalesForceAutomation:
         self.sf.Account_Update__c.update(account_update_id, payload)
 
 
-    def send_email_with_template(self, template_id, contact_id, account_update_id):
-      payload = {
-         'inputs': [
-                     {'Template_Id': template_id,
-                     'Recipient_Id': contact_id,
-                     'Account_Update_Id': account_update_id}
-                     ]
-                  }
+    def send_email_with_template(self, template_logic: dict, contact_id, account_update_id):
+        """
+        template_logic = {'ivr_type': 'VOW Full', 'self install': True}
+        """
+        ivr_key = template_logic.get('ivr_type')
+        self_install = template_logic.get('self install')
 
-      flow_url = f'{config["instance_url"]}/services/data/v61.0/actions/custom/flow/Email_From_Account_Update'
-      response = requests.post(flow_url, headers=self.headers, json=payload)
+        # Works for full solution right now. Needs updating in the future
+        # Possible organization by __file__ that ran this function?
+        template_id = None
+        if ivr_key in self.email_templates_mapping:
+            # Determine which template to select based on self install
+            if self_install:
+                template_id = self.email_templates_mapping[ivr_key].get('Self Install')
+            else:
+                template_id = self.email_templates_mapping[ivr_key].get('Normal')
+        print(f'TEMPLATE ID: {template_id}')
+        payload = {
+            'inputs': [
+                        {'Template_Id': template_id,
+                        'Recipient_Id': contact_id,
+                        'Account_Update_Id': account_update_id}
+                        ]
+                    }
 
-      if response.status_code == 200:
-          return True
-      else:
-          return False
+        flow_url = f'{config["instance_url"]}/services/data/v61.0/actions/custom/flow/Email_From_Account_Update'
+        response = requests.post(flow_url, headers=self.headers, json=payload)
+
+        print(f'EMAIL RESPONSE: {response.content}')
+        if response.status_code == 200:
+            return True
+        else:
+            return False
 
 
     def get_contact_id(self, account_update_id):
@@ -319,7 +342,10 @@ class GoogleDriveAutomation:
             return False, error
     
     
-    def email_with_attachement(self, sender_email, receiver_emails, subject, body, attachment_path):
+    def email_with_attachement(self, receiver_emails, subject, body, attachment_path, sender_email=None):
+        if not sender_email:
+            sender_email = config.get('sender_email_address')
+
         try:
             # Authenticate with Gmail API
             creds = Credentials.from_authorized_user_file(self.gspread_token_path, self.scope)
@@ -391,16 +417,17 @@ class GoogleDriveAutomation:
 class CalCom:
     def __init__(self) -> None:
         self.logger = get_logger(module='CalCom')
-        self.config_path = 'keys/config.json'
         self.base_url = 'https://api.cal.com/v1/'
 
         self.today = date.today()
-        self.this_week = self.today.isocalendar()[1]
-        self.next_week = self.this_week + 1
+        self.first_week = self.today.isocalendar()[1]
+        self.second_week = self.first_week + 1
+        self.third_week = self.first_week + 2
         self.this_year = int(self.today.strftime("%Y"))
-        self.next_friday = date.fromisocalendar(self.this_year, self.next_week, 5)
+        self.second_friday = date.fromisocalendar(self.this_year, self.second_week, 5)
+        self.third_friday = date.fromisocalendar(self.this_year, self.third_week, 5)
 
-        with open(self.config_path, 'r') as file:
+        with open(config_path, 'r') as file:
             config = json.load(file)
             self.api_key = config['cal_com_key']
 
@@ -433,10 +460,11 @@ class CalCom:
             'Friday': 5
         }
 
+
     def get_event_slots(self, event_id: int, start_date: datetime, timezone: str) -> dict:
         payload = {"eventTypeId": event_id, # Integer
                     "startTime": start_date, # DateTime
-                    "endTime": self.next_friday, # DateTime
+                    "endTime": self.third_friday, # DateTime
                     "timeZone": timezone} # US/Eastern
         response = requests.get(f'{self.base_url}slots?apiKey={self.api_key}', 
                                 params=payload)
@@ -471,11 +499,12 @@ class CalCom:
         dates = []
         for name, value in self.days_mapping.items():
             if name in preferred_days:
-                dates.append(date.fromisocalendar(self.this_year, self.next_week, value).strftime('%Y-%m-%d'))
-                test = date.fromisocalendar(self.this_year, self.this_week, value)
+                dates.append(date.fromisocalendar(self.this_year, self.third_week, value).strftime('%Y-%m-%d'))
+                dates.append(date.fromisocalendar(self.this_year, self.second_week, value).strftime('%Y-%m-%d'))
+                possible_day = date.fromisocalendar(self.this_year, self.first_week, value)
 
-                if self.today < test:
-                    dates.append(test.strftime('%Y-%m-%d'))
+                if self.today < possible_day:
+                    dates.append(possible_day.strftime('%Y-%m-%d'))
         
         dates.sort()
         return dates
