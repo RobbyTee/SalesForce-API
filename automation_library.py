@@ -203,7 +203,7 @@ class SalesForceAutomation:
                 template_id = self.email_templates_mapping[ivr_key].get('Self Install')
             else:
                 template_id = self.email_templates_mapping[ivr_key].get('Normal')
-        print(f'TEMPLATE ID: {template_id}')
+
         payload = {
             'inputs': [
                         {'Template_Id': template_id,
@@ -215,7 +215,6 @@ class SalesForceAutomation:
         flow_url = f'{config["instance_url"]}/services/data/v61.0/actions/custom/flow/Email_From_Account_Update'
         response = requests.post(flow_url, headers=self.headers, json=payload)
 
-        print(f'EMAIL RESPONSE: {response.content}')
         if response.status_code == 200:
             return True
         else:
