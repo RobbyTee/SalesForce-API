@@ -14,12 +14,13 @@ from automation_library import get_logger, CredentialsManager, SalesForceAutomat
 # SalesForce Report to pull
 report_id = '00O4v000008E412EAC'    # Shipped/Arrived Report
 
-# IVR Type: this must be exactly as the report lists it
+# IVR Type - this must be exactly as the report lists it
 type = 'VOW Full'
 
 # Firewall Rules
 firewall_rules_folder_id = '1l5TLSDFNJpCV22_kfupsAT1XOuZk4dZb'  # Implementation Drive/Automation/Firewall Rules
 sheet_id = '1OYVd56jFOnsl0nLd3jVAhuo7z9d553llGFkH4lgdNqI'       # Full Solution
+
 
 def process_google_doc(pharmacy_name):
     """
@@ -72,7 +73,7 @@ def main():
     if not success:
         print('Failed to load your configuration file. Stopping the script!')
         return
-    
+
     # Authorize access to Google Account
     google_drive = GoogleDriveAutomation()
 
@@ -105,22 +106,22 @@ def main():
         pharmacy_name = report.iloc[num]['Account Name']
         ivr_type = report.iloc[num]['IVR Type']
         equipment_arrival_date = report.iloc[num]['Equipment Arrival Date']
-        fw_rules_req = report.iloc[num]['Firewall Rules Required']
-        firewall_rules_required = fw_rules_req.lower() == "true"
 
         # Check if the IVR Type matches the type for the script
         if ivr_type != type:
-            print(f'{pharmacy_name} is type {ivr_type}. Skipping this pharmacy.')
+            print(f'\n{pharmacy_name} is type {ivr_type}. Skipping this pharmacy.')
             continue
         
         print(f'\nStarting work on {pharmacy_name}.')
-        logger.info(f'\nStarting work on {pharmacy_name}.')
+        logger.info(f'Starting work on {pharmacy_name}.')
         
         # Grab all variables from the Account Update
         fields = ['Id', 'Contact_Name__c', 'Contact_Email__c', 
                   'Install_Date_Time__c', 'IVR_Install_Tier__c', 
                   'Customer_Account_Google_URL__c', 'Install_Best_Days__c',
-                  'Install_Best_Hours__c', 'Timezone__c', 'Specific_Install_Hours__c']
+                  'Install_Best_Hours__c', 'Timezone__c', 
+                  'Specific_Install_Hours__c', 'Self_Installing__c',
+                  'Firewall_Rules_Required__c']
         au = salesforce.get_account_update_info(account_update=account_update,
                                            fields=fields)
 
@@ -134,7 +135,9 @@ def main():
         install_specific_hours = au.get('Specific_Install_Hours__c')
         google_url = au.get('Customer_Account_Google_URL__c')
         full_timezone = au.get('Timezone__c')
-        
+        self_installing = au.get('Self_Installing__c')
+        firewall_rules_required = au.get('Firewall_Rules_Required__c')
+
         """
         Time to download the Google Doc. The URL could look like these:
         https://drive.google.com/drive/folders/g5hqbc9Nk3MwqJbV7
@@ -203,7 +206,7 @@ Skipping {pharmacy_name} for now and processing the next one.
             install_best_dates = cal.convert_days_to_dates(preferred_days=install_best_days)
             
             # This is not how I imagined this to work. Needs updating!
-            # Picking the Event Slot: Either First Available
+            # Picking the Event Slot: Either First Available ...
             if install_best_hours == 'First Available':
                 slot = cal.get_first_available(avail_slots=available_slots)
                 if slot == None:
@@ -227,7 +230,7 @@ Skipping {pharmacy_name} for now and processing the next one.
                 result_mapping = {
                     'Perfect Match': '    O There is an available slot that is a perfect match',
                     'Close Enough': '    O Their preferred day is available, but had to compromise on time',
-                    'Nothing': '    X No matching install slots found; therefore selecting first available slot'
+                    'Nothing': f'    X Found no matching slot. Forced this slot: {slot}'
                 }
 
                 print(result_mapping[result])
@@ -256,10 +259,14 @@ Skipping {pharmacy_name} for now and processing the next one.
                 print('    O Scheduled install and updated Account Update successfully')
                 
                 contact_id = salesforce.get_contact_id(account_update_id=account_update_id)
-
-                salesforce.send_email_with_template(template_id='00X4v000002oCuOEAU', # FS Install Appointment Confirmation
+                template_logic = {'ivr_type': ivr_type, 'self install': self_installing}
+                success = salesforce.send_email_with_template(template_logic=template_logic,
                                                     contact_id=contact_id,
                                                     account_update_id=account_update_id)
+                if not success:
+                    print('    X Failed to send appointment confirmation from Account Update')
+                else:
+                    print('    O Sent appointment confirmation email from Account Update')
 
                 # Update AU with Eastern Time
                 eastern_install_time = cal.convert_to_eastern_time(event_slot)
@@ -321,12 +328,12 @@ Typically, the address at .250 is available on the network. We will statically a
 
 If you have any questions, please reply to this email or call us at (864) 541-0650 and ask for the Installation Team.<br><br>
 """
-            success, error = google_drive.email_with_attachement(sender_email='ivr.installation@lumistry.com',
-                                                                 receiver_emails=recipients,
+            success, error = google_drive.email_with_attachement(receiver_emails=recipients,
                                                                  subject=subject,
                                                                  body=body,
                                                                  attachment_path='Firewall Rules.pdf')
             if not success:
+                print('    X Failed sending email with firewall rules')
                 print(error)
                 continue
             
