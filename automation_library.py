@@ -21,7 +21,6 @@ from google.oauth2.credentials import Credentials
 from pandas import DataFrame
 from pydrive2.auth import GoogleAuth, RefreshError
 from pydrive2.drive import GoogleDrive
-
 from simple_salesforce import Salesforce
 from time import sleep
 
