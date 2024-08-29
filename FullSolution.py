@@ -15,7 +15,7 @@ from automation_library import get_logger, CredentialsManager, SalesForceAutomat
 report_id = '00O4v000008E412EAC'    # Shipped/Arrived Report
 
 # IVR Type - this must be exactly as the report lists it
-type = 'VOW Full'
+project_type = 'VOW Full'
 
 # Firewall Rules
 firewall_rules_folder_id = '1l5TLSDFNJpCV22_kfupsAT1XOuZk4dZb'  # Implementation Drive/Automation/Firewall Rules
@@ -35,6 +35,7 @@ def process_google_doc(pharmacy_name):
     local_ip_scheme = None
     opie_ip = "DHCP"
     pms_vendor = None
+    contact_work_number = None
     contact_phone_number = None
     it_contact_name = None
     it_contact_email = None
@@ -51,6 +52,8 @@ def process_google_doc(pharmacy_name):
                     pass
             if 'Pharmacy Software Vendor' in line:
                 pms_vendor = line.split(':')[1].strip()
+            if 'Primary Work Phone' in line:
+                contact_work_number = line.split(':')[1].strip()
             if 'Primary Cell Phone' in line:
                 contact_phone_number = line.split(':')[1].strip()
             if 'IT Contact Name' in line:
@@ -59,6 +62,13 @@ def process_google_doc(pharmacy_name):
                 it_contact_email = line.split(':')[1].strip()
 
     os.remove(filename)
+
+    if len(contact_phone_number) < 7 and len(contact_work_number) > 5:
+        contact_phone_number = contact_work_number
+
+    else:
+        contact_phone_number = None
+
     return opie_ip, pms_vendor, contact_phone_number, it_contact_name, it_contact_email
 
 
@@ -108,7 +118,7 @@ def main():
         equipment_arrival_date = report.iloc[num]['Equipment Arrival Date']
 
         # Check if the IVR Type matches the type for the script
-        if ivr_type != type:
+        if ivr_type != project_type:
             print(f'\n{pharmacy_name} is type {ivr_type}. Skipping this pharmacy.')
             continue
         
@@ -121,13 +131,14 @@ def main():
                   'Customer_Account_Google_URL__c', 'Install_Best_Days__c',
                   'Install_Best_Hours__c', 'Timezone__c', 
                   'Specific_Install_Hours__c', 'Self_Installing__c',
-                  'Firewall_Rules_Required__c']
+                  'Firewall_Rules_Required__c', 'Contact_Phone__c']
         au = salesforce.get_account_update_info(account_update=account_update,
                                            fields=fields)
 
         account_update_id = au.get('Id')
         contact_name = au.get('Contact_Name__c')
         contact_email = au.get('Contact_Email__c')
+        contact_phone_from_au = au.get('Contact_Phone__c')
         install_date_time = au.get('Install_Date_Time__c')
         install_tier = au.get('IVR_Install_Tier__c')
         install_best_days = au.get('Install_Best_Days__c').split(';')
@@ -166,6 +177,9 @@ Skipping {pharmacy_name} for now and processing the next one.
         contact_phone_number, 
         it_contact_name,
         it_contact_email) = process_google_doc(pharmacy_name=pharmacy_name)
+
+        if not contact_phone_number:
+            contact_phone_number = contact_phone_from_au
 
         # Determine if the pharmacy already has an install date
         if install_date_time:
@@ -250,7 +264,8 @@ Skipping {pharmacy_name} for now and processing the next one.
                 
             # Amend the Account Update
             else:
-                payload = {'Install_Date_Time__c': event_slot, 
+                customers_datetime = salesforce.prepare_install_date(event_slot=event_slot)
+                payload = {'Install_Date_Time__c': customers_datetime, 
                             'Status__c': 'Install Requested',
                             'Contact_Phone__c': contact_phone_number,
                             'Reschedule_Install_Appointment__c': reschedule_link}
@@ -268,12 +283,10 @@ Skipping {pharmacy_name} for now and processing the next one.
                 else:
                     print('    O Sent appointment confirmation email from Account Update')
 
-                # Update AU with Eastern Time
-                eastern_install_time = cal.convert_to_eastern_time(event_slot)
-                payload = {'Install_Date_Time__c': eastern_install_time}
+                payload = {'Install_Date_Time__c': event_slot}
                 salesforce.update_account_update(account_update_id=account_update_id, 
                                                  payload=payload)
-            
+
         # Send Firewall Rules
         if firewall_rules_required:
             print('    O Must send firewall rules')
