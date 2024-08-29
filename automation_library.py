@@ -228,6 +228,25 @@ class SalesForceAutomation:
             return response['records'][0]['Contact__c']
         else:
             return None
+    
+
+    def prepare_install_date(self, event_slot):
+        # Parse the datetime string with timezone information
+        local_time = datetime.strptime(event_slot, "%Y-%m-%dT%H:%M:%S%z")
+
+        # Define your Salesforce user timezone (e.g., Eastern Daylight Time, UTC-4)
+        your_timezone = pytz.timezone("America/New_York")
+        your_time = local_time.astimezone(your_timezone)
+
+        # Calculate the difference between the two timezones
+        time_difference = your_time.utcoffset() - local_time.utcoffset()
+
+        # Adjust the time backwards by the difference
+        adjusted_time = local_time - time_difference
+
+        # Format the datetime in ISO 8601 format for Salesforce
+        install_date = adjusted_time.strftime("%Y-%m-%dT%H:%M:%S.%f%z")
+        return install_date
 
 
 class GoogleDriveAutomation:        
@@ -351,7 +370,7 @@ class GoogleDriveAutomation:
             service = build('gmail', 'v1', credentials=creds)
             
             # Create recipients string
-            recipients = ', '.join(receiver_emails)
+            recipients = ', '.join([email for email in receiver_emails if email])
 
             # Create the email
             message = MIMEMultipart('mixed')
