@@ -62,5 +62,5 @@ Your SalesForce username will be saved; saving your password is optional. Anythi
 8. Copy the API Key
 
 
-Bugs
+## Bugs
 Report bugs to your project admin. Workarounds for common issues will be posted here until a solution is implemented.
