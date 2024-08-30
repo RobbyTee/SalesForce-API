@@ -33,7 +33,7 @@ This Python project is for the Lumistry Implementation Team.
 	Ask your project admin to fill in ‘config.json’ and ‘google_auth.json’ with keys
 	Open Terminal (Windows: Command Prompt)
 	Navigate to the root folder of this project
-	Run pip install requirements.txt
+	Run pip install -r requirements.txt
 	Run python setup.py
 
 
